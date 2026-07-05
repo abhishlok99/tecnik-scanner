@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TranZact Inward Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body { font-family: 'Google Sans', Arial, sans-serif; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; }
+    .container { max-width: 550px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+    h2 { color: #1a73e8; margin-top: 0; text-align: center; font-size: 24px; }
+    #reader { width: 100%; border-radius: 8px; margin-bottom: 20px; overflow: hidden; border: 3px solid #1a73e8; }
+    input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid #ddd; font-size: 16px; box-sizing: border-box; }
+    button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; cursor: pointer; font-weight: bold; transition: transform 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
+    button:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+    .btn-small { padding: 8px 12px; font-size: 13px; width: auto; margin: 0 0 0 8px; }
+    .qr-row { display: flex; align-items: center; }
+    .qr-row input { flex: 1; margin: 8px 0; }
+    .form-group { margin: 15px 0; }
+    label { display: block; margin-bottom: 5px; color: #333; font-weight: 500; }
+    .status { padding: 15px; border-radius: 6px; margin-top: 15px; text-align: center; font-weight: 500; display: none; }
+    .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .error   { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .info    { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    #itemInfo { background: #f8f9fa; padding: 12px; border-radius: 6px; margin: 10px 0; display: none; }
+    .loader { border: 4px solid #f3f3f3; border-top: 4px solid #667eea; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 10px auto; display: none; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>📦 TranZact Inward Scanner</h2>
+
+    <div id="reader"></div>
+
+    <div class="form-group">
+      <label><b>Scanned QR Code</b> <span style="font-weight:normal;color:#888">(scan or type manually)</span></label>
+      <div class="qr-row">
+        <input type="text" id="qrCode" placeholder="Scan QR or type Item ID here" oninput="onManualInput()">
+        <button class="btn-small" onclick="lookupManual()">Look Up</button>
+      </div>
+    </div>
+
+    <div id="itemInfo">
+      <strong>Item Found:</strong><br>
+      <span id="itemDetails"></span>
+    </div>
+
+    <div class="form-group">
+      <label><b>Quantity Received</b></label>
+      <input type="number" id="qty" value="1" min="1" required>
+    </div>
+
+    <div class="form-group">
+      <label><b>Challan Number</b> <span style="color:#e53935">*</span></label>
+      <input type="text" id="challanNumber" placeholder="Supplier challan / delivery note number" required>
+    </div>
+
+    <div class="form-group">
+      <label><b>PO Number (Optional)</b></label>
+      <input type="text" id="poNumber" placeholder="Enter PO number if available">
+    </div>
+
+    <div class="form-group">
+      <label><b>Supplier Company ID (Optional)</b></label>
+      <input type="text" id="supplierId" placeholder="Leave empty to use default">
+    </div>
+
+    <button id="submitBtn" onclick="submitInward()" disabled>Submit &amp; Notify QC</button>
+
+    <div class="loader" id="loader"></div>
+    <div id="statusMessage" class="status"></div>
+  </div>
+
+  <script>
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxGnhMativRITPuALyr23Ga9mqBIvNKC4OcpmKa5yHUPKmsgJjRHdCmFU5jP0yTR-z5/exec';
+
+    let html5QrCode;
+    let lastScannedCode = '';
+
+    function callAPI(params) {
+      const url = new URL(SCRIPT_URL);
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+      return fetch(url.toString()).then(r => r.json());
+    }
+
+    function onManualInput() {
+      document.getElementById('itemInfo').style.display = 'none';
+      document.getElementById('submitBtn').disabled = true;
+    }
+
+    function lookupManual() {
+      const val = document.getElementById('qrCode').value.trim();
+      if (!val) { showStatus('Enter an Item ID first', 'error'); return; }
+      showStatus('Looking up item...', 'info');
+      callAPI({ action: 'lookupItem', qrCode: val }).then(onItemLookup).catch(onError);
+    }
+
+    function onScanSuccess(decodedText) {
+      if (decodedText !== lastScannedCode) {
+        lastScannedCode = decodedText;
+        document.getElementById('qrCode').value = decodedText;
+        showStatus('Looking up item...', 'info');
+        callAPI({ action: 'lookupItem', qrCode: decodedText }).then(onItemLookup).catch(onError);
+        html5QrCode.stop().catch(() => {});
+      }
+    }
+
+    function onItemLookup(result) {
+      if (result.success) {
+        const item = result.item;
+        document.getElementById('itemDetails').innerHTML =
+          `<strong>${item.itemName}</strong><br>` +
+          `ID: ${item.itemId}<br>` +
+          `UOM: ${item.uom}<br>` +
+          `Type: ${item.itemType}`;
+        document.getElementById('itemInfo').style.display = 'block';
+        document.getElementById('submitBtn').disabled = false;
+        showStatus('✓ Item found! Enter quantity and challan number, then submit.', 'success');
+      } else {
+        showStatus('⚠ ' + result.error, 'error');
+        document.getElementById('submitBtn').disabled = true;
+      }
+    }
+
+    function submitInward() {
+      const qrCode     = document.getElementById('qrCode').value.trim();
+      const qty        = parseFloat(document.getElementById('qty').value);
+      const challan    = document.getElementById('challanNumber').value.trim();
+      const poNumber   = document.getElementById('poNumber').value;
+      const supplierId = document.getElementById('supplierId').value;
+
+      if (!qrCode)          { showStatus('⚠ Please scan or enter a QR code first', 'error'); return; }
+      if (!qty || qty <= 0) { showStatus('⚠ Please enter a valid quantity', 'error'); return; }
+      if (!challan)         { showStatus('⚠ Challan number is required', 'error'); return; }
+
+      document.getElementById('submitBtn').disabled = true;
+      document.getElementById('loader').style.display = 'block';
+      showStatus('Logging inward and notifying QC...', 'info');
+
+      callAPI({ action: 'processInward', qrCode, quantity: qty, challanNumber: challan, poNumber, supplierCompanyId: supplierId })
+        .then(onInwardSuccess).catch(onError);
+    }
+
+    function onInwardSuccess(result) {
+      document.getElementById('loader').style.display = 'none';
+      if (result.success) {
+        showStatus(
+          result.dryRun ? '✓ DRY RUN: ' + result.message : '✓ Logged. QC has been notified.',
+          result.dryRun ? 'info' : 'success'
+        );
+        setTimeout(() => {
+          document.getElementById('qrCode').value = '';
+          document.getElementById('qty').value = '1';
+          document.getElementById('challanNumber').value = '';
+          document.getElementById('poNumber').value = '';
+          document.getElementById('supplierId').value = '';
+          document.getElementById('itemInfo').style.display = 'none';
+          document.getElementById('submitBtn').disabled = true;
+          lastScannedCode = '';
+          startScanner();
+        }, 2500);
+      } else {
+        showStatus('✗ ERROR: ' + result.error, 'error');
+        document.getElementById('submitBtn').disabled = false;
+      }
+    }
+
+    function onError(err) {
+      document.getElementById('loader').style.display = 'none';
+      showStatus('✗ ERROR: ' + (err.message || err), 'error');
+      document.getElementById('submitBtn').disabled = false;
+    }
+
+    function showStatus(message, type) {
+      const s = document.getElementById('statusMessage');
+      s.className = 'status ' + type;
+      s.innerHTML = message;
+      s.style.display = 'block';
+    }
+
+    function startScanner() {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+        .then(function(stream) {
+          stream.getTracks().forEach(t => t.stop());
+          html5QrCode = new Html5Qrcode("reader");
+          html5QrCode.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            onScanSuccess
+          ).catch(err => showStatus('Camera error: ' + err, 'error'));
+        })
+        .catch(function() {
+          showStatus('📷 Camera permission denied. Please allow camera access in your browser settings and refresh.', 'error');
+        });
+    }
+
+    window.onload = startScanner;
+  </script>
+</body>
+</html>
