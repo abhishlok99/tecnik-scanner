@@ -466,8 +466,10 @@ function processQCApproval(itemId, acceptedQty, qcResult, binLocation) {
       sheet.getRange(targetRow, 10).setValue(binLocation || '');
       sheet.getRange(targetRow, 11).setValue('QC_PASSED');
       sheet.getRange(targetRow, 13).setValue('DRY_RUN');
+      logPartialRejection(qrCode, itemId, row[3], receivedQty, qty, challan, poNumber);
       logAudit('QC_PASS_DRY_RUN', itemId, qty, activeUser(), 'DRY_RUN', '', JSON.stringify(payload), 'NOT SENT', '');
-      return { success: true, dryRun: true, message: 'DRY RUN — QC pass logged. Set DRY_RUN_MODE=FALSE to go live.' };
+      const partialMsg = qty < receivedQty ? ` ${receivedQty - qty} units logged as partially rejected.` : '';
+      return { success: true, dryRun: true, message: 'DRY RUN — QC pass logged. Set DRY_RUN_MODE=FALSE to go live.' + partialMsg };
     }
 
     const apiUrl = `${config.baseUrl}/documents/inward/create-document-data/`;
@@ -493,13 +495,33 @@ function processQCApproval(itemId, acceptedQty, qcResult, binLocation) {
     sheet.getRange(targetRow, 13).setValue('SUCCESS');
     sheet.getRange(targetRow, 14).setValue(body);
 
+    logPartialRejection(qrCode, itemId, row[3], receivedQty, qty, challan, poNumber);
     logAudit('QC_PASS_INWARD', itemId, qty, activeUser(), 'SUCCESS', apiUrl, JSON.stringify(payload), body, '');
-    return { success: true, message: `Inward created in TranZact. Doc ID: ${inwardDocId}`, inwardDocId };
+    const partialNote = qty < receivedQty ? ` ${receivedQty - qty} units logged as partially rejected.` : '';
+    return { success: true, message: `Inward created in TranZact. Doc ID: ${inwardDocId}` + partialNote, inwardDocId };
 
   } catch (e) {
     logError('QC_APPROVAL', itemId, acceptedQty, 'EXCEPTION', e.toString());
     return { success: false, error: e.toString() };
   }
+}
+
+// ============ PARTIAL REJECTION HELPER ============
+
+function logPartialRejection(qrCode, itemId, itemName, receivedQty, acceptedQty, challan, poNumber) {
+  const rejected = parseFloat(receivedQty) - parseFloat(acceptedQty);
+  if (rejected <= 0) return;
+  const rejSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Scan_Rejected');
+  if (rejSheet) rejSheet.appendRow([
+    new Date(), qrCode, itemId, itemName, rejected,
+    challan, poNumber, `Partial acceptance — ${acceptedQty} of ${receivedQty} accepted`,
+    PURCHASE_EMAIL + ',' + PRODUCTION_EMAIL, 'OPEN', ''
+  ]);
+  const msg = `Partial QC rejection for item ${itemId} (${itemName}).\n\n` +
+              `Received: ${receivedQty}\nAccepted: ${acceptedQty}\nRejected: ${rejected}\n` +
+              `Challan: ${challan}\nPO: ${poNumber || 'N/A'}\n\nAction required: return or dispose rejected units.`;
+  MailApp.sendEmail({ to: PURCHASE_EMAIL,   subject: `Partial Rejection — ${itemId}`, body: msg });
+  MailApp.sendEmail({ to: PRODUCTION_EMAIL, subject: `Partial Rejection — ${itemId}`, body: msg });
 }
 
 // ============ OUTWARD PROCESSING ============
