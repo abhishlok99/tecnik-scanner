@@ -3,7 +3,7 @@
 // =============================================
 
 var REPORTING_BASE   = 'https://reporting.letstranzact.com';
-var QC_EMAIL         = 'atharv.swarge@flytbase.com';
+var QC_EMAIL         = 'atharv.swarge@flytbase.com,abhishlok99@gmail.com';
 var PURCHASE_EMAIL   = 'abhishlok99@gmail.com';
 var PRODUCTION_EMAIL = 'abhishlok99@gmail.com';
 
