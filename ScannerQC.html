@@ -188,7 +188,16 @@
         });
     }
 
-    window.onload = startScanner;
+    window.onload = function() {
+      const params = new URLSearchParams(window.location.search);
+      const prefilledId = params.get('itemId');
+      if (prefilledId) {
+        document.getElementById('itemId').value = prefilledId;
+        lookupPending();
+      } else {
+        startScanner();
+      }
+    };
   </script>
 </body>
 </html>
