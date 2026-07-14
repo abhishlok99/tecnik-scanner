@@ -421,6 +421,17 @@ function processQCApproval(itemId, acceptedQty, qcResult, binLocation) {
     const qty = parseFloat(acceptedQty);
     if (!qty || qty <= 0) throw new Error('Invalid accepted quantity');
 
+    if (config.dryRun) {
+      sheet.getRange(targetRow, 6).setValue(qty);
+      sheet.getRange(targetRow, 10).setValue(binLocation || '');
+      sheet.getRange(targetRow, 11).setValue('QC_PASSED');
+      sheet.getRange(targetRow, 13).setValue('DRY_RUN');
+      logPartialRejection(qrCode, itemId, row[3], receivedQty, qty, challan, poNumber);
+      logAudit('QC_PASS_DRY_RUN', itemId, qty, activeUser(), 'DRY_RUN', '', '', 'NOT SENT', '');
+      const partialMsg = qty < receivedQty ? ` ${receivedQty - qty} units logged as partially rejected.` : '';
+      return { success: true, dryRun: true, message: 'DRY RUN — QC pass logged. Set DRY_RUN_MODE=FALSE to go live.' + partialMsg };
+    }
+
     const productResult = getProductFromTranZact(itemId, config);
     if (!productResult.success) throw new Error('TranZact product lookup failed: ' + productResult.error);
     const product = productResult.product;
@@ -460,17 +471,6 @@ function processQCApproval(itemId, acceptedQty, qcResult, binLocation) {
       save_action: 'save_as_draft',
       action: 'create'
     };
-
-    if (config.dryRun) {
-      sheet.getRange(targetRow, 6).setValue(qty);
-      sheet.getRange(targetRow, 10).setValue(binLocation || '');
-      sheet.getRange(targetRow, 11).setValue('QC_PASSED');
-      sheet.getRange(targetRow, 13).setValue('DRY_RUN');
-      logPartialRejection(qrCode, itemId, row[3], receivedQty, qty, challan, poNumber);
-      logAudit('QC_PASS_DRY_RUN', itemId, qty, activeUser(), 'DRY_RUN', '', JSON.stringify(payload), 'NOT SENT', '');
-      const partialMsg = qty < receivedQty ? ` ${receivedQty - qty} units logged as partially rejected.` : '';
-      return { success: true, dryRun: true, message: 'DRY RUN — QC pass logged. Set DRY_RUN_MODE=FALSE to go live.' + partialMsg };
-    }
 
     const apiUrl = `${config.baseUrl}/documents/inward/create-document-data/`;
     const resp = UrlFetchApp.fetch(apiUrl, {
