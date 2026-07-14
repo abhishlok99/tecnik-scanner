@@ -2,10 +2,7 @@
 // TranZact QR Inventory System
 // =============================================
 
-var REPORTING_BASE   = 'https://reporting.letstranzact.com';
-var QC_EMAIL         = 'atharv.swarge@flytbase.com,abhishlok99@gmail.com';
-var PURCHASE_EMAIL   = 'abhishlok99@gmail.com';
-var PRODUCTION_EMAIL = 'abhishlok99@gmail.com';
+var REPORTING_BASE = 'https://reporting.letstranzact.com';
 
 // ============ WEB APP ENTRY POINTS ============
 
@@ -82,7 +79,10 @@ function setupSystem() {
       ['DEFAULT_SUPPLIER_ID',         ''],
       ['DRY_RUN_MODE',                'TRUE'],
       ['ENABLE_QIR',                  'FALSE'],
-      ['LOG_LEVEL',                   'INFO']
+      ['LOG_LEVEL',                   'INFO'],
+      ['QC_EMAIL',                    ''],
+      ['PURCHASE_EMAIL',              ''],
+      ['PRODUCTION_EMAIL',            '']
     ];
     defaults.forEach(([key, defaultVal], i) => {
       const row = i + 2;
@@ -159,7 +159,7 @@ function loadConfig() {
   const cfg = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config');
   if (!cfg) throw new Error('Config sheet not found. Run Setup System first.');
 
-  const rows = cfg.getRange(2, 1, 13, 2).getValues();
+  const rows = cfg.getRange(2, 1, 16, 2).getValues();
   const c = {};
   rows.forEach(r => { if (r[0]) c[r[0]] = r[1]; });
 
@@ -176,8 +176,11 @@ function loadConfig() {
     supplierBillingAddressId: c.SUPPLIER_BILLING_ADDRESS_ID || '',
     docNumberSeriesId:        c.DOC_NUMBER_SERIES_ID || '',
     defaultSupplierId:        c.DEFAULT_SUPPLIER_ID || '',
-    dryRun:    String(c.DRY_RUN_MODE).toUpperCase() === 'TRUE',
-    enableQIR: String(c.ENABLE_QIR).toUpperCase() === 'TRUE'
+    dryRun:        String(c.DRY_RUN_MODE).toUpperCase() === 'TRUE',
+    enableQIR:     String(c.ENABLE_QIR).toUpperCase() === 'TRUE',
+    qcEmail:       String(c.QC_EMAIL || ''),
+    purchaseEmail: String(c.PURCHASE_EMAIL || ''),
+    productionEmail: String(c.PRODUCTION_EMAIL || '')
   };
 }
 
@@ -310,7 +313,7 @@ function processInward(qrCode, quantity, challanNumber, poNumber, supplierCompan
 
     const qcLink = `https://abhishlok99.github.io/tecnik-scanner/ScannerQC.html?itemId=${encodeURIComponent(item.itemId)}`;
     MailApp.sendEmail({
-      to: QC_EMAIL,
+      to: config.qcEmail,
       subject: `QC Check Required — ${item.itemId}`,
       body: `Item received at stores. Please inspect and approve.\n\n` +
             `Item ID:  ${item.itemId}\n` +
@@ -324,7 +327,7 @@ function processInward(qrCode, quantity, challanNumber, poNumber, supplierCompan
             `On Phone: Scan the QR code on the item in the QC Scanner app`
     });
 
-    return { success: true, message: `Logged. QC notified at ${QC_EMAIL}.`, item };
+    return { success: true, message: `Logged. QC notified at ${config.qcEmail}.`, item };
   } catch (e) {
     logError('INWARD', qrCode, quantity, 'EXCEPTION', e.toString());
     return { success: false, error: e.toString() };
@@ -404,14 +407,14 @@ function processQCApproval(itemId, acceptedQty, qcResult, binLocation) {
       const rejSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Scan_Rejected');
       if (rejSheet) rejSheet.appendRow([
         new Date(), qrCode, itemId, row[3], receivedQty,
-        challan, poNumber, '', PURCHASE_EMAIL + ',' + PRODUCTION_EMAIL, 'OPEN', ''
+        challan, poNumber, '', config.purchaseEmail + ',' + config.productionEmail, 'OPEN', ''
       ]);
 
       const msg = `QC FAILED for item ${itemId} (${row[3]}).\n\n` +
                   `Received: ${receivedQty}\nChallan: ${challan}\nPO: ${poNumber || 'N/A'}\n\n` +
                   `Action required: initiate return or rejection flow.`;
-      MailApp.sendEmail({ to: PURCHASE_EMAIL,   subject: `QC Failed — ${itemId}`, body: msg });
-      MailApp.sendEmail({ to: PRODUCTION_EMAIL, subject: `QC Failed — ${itemId}`, body: msg });
+      MailApp.sendEmail({ to: config.purchaseEmail,   subject: `QC Failed — ${itemId}`, body: msg });
+      MailApp.sendEmail({ to: config.productionEmail, subject: `QC Failed — ${itemId}`, body: msg });
 
       logAudit('QC_FAIL', itemId, receivedQty, activeUser(), 'QC_FAILED', '', '', '', '');
       return { success: true, message: 'QC Failed recorded. Purchase and production notified.' };
@@ -426,7 +429,7 @@ function processQCApproval(itemId, acceptedQty, qcResult, binLocation) {
       sheet.getRange(targetRow, 10).setValue(binLocation || '');
       sheet.getRange(targetRow, 11).setValue('QC_PASSED');
       sheet.getRange(targetRow, 13).setValue('DRY_RUN');
-      logPartialRejection(qrCode, itemId, row[3], receivedQty, qty, challan, poNumber);
+      logPartialRejection(qrCode, itemId, row[3], receivedQty, qty, challan, poNumber, config);
       logAudit('QC_PASS_DRY_RUN', itemId, qty, activeUser(), 'DRY_RUN', '', '', 'NOT SENT', '');
       const partialMsg = qty < receivedQty ? ` ${receivedQty - qty} units logged as partially rejected.` : '';
       return { success: true, dryRun: true, message: 'DRY RUN — QC pass logged. Set DRY_RUN_MODE=FALSE to go live.' + partialMsg };
@@ -495,7 +498,7 @@ function processQCApproval(itemId, acceptedQty, qcResult, binLocation) {
     sheet.getRange(targetRow, 13).setValue('SUCCESS');
     sheet.getRange(targetRow, 14).setValue(body);
 
-    logPartialRejection(qrCode, itemId, row[3], receivedQty, qty, challan, poNumber);
+    logPartialRejection(qrCode, itemId, row[3], receivedQty, qty, challan, poNumber, config);
     logAudit('QC_PASS_INWARD', itemId, qty, activeUser(), 'SUCCESS', apiUrl, JSON.stringify(payload), body, '');
     const partialNote = qty < receivedQty ? ` ${receivedQty - qty} units logged as partially rejected.` : '';
     return { success: true, message: `Inward created in TranZact. Doc ID: ${inwardDocId}` + partialNote, inwardDocId };
@@ -508,20 +511,20 @@ function processQCApproval(itemId, acceptedQty, qcResult, binLocation) {
 
 // ============ PARTIAL REJECTION HELPER ============
 
-function logPartialRejection(qrCode, itemId, itemName, receivedQty, acceptedQty, challan, poNumber) {
+function logPartialRejection(qrCode, itemId, itemName, receivedQty, acceptedQty, challan, poNumber, config) {
   const rejected = parseFloat(receivedQty) - parseFloat(acceptedQty);
   if (rejected <= 0) return;
   const rejSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Scan_Rejected');
   if (rejSheet) rejSheet.appendRow([
     new Date(), qrCode, itemId, itemName, rejected,
     challan, poNumber, `Partial acceptance — ${acceptedQty} of ${receivedQty} accepted`,
-    PURCHASE_EMAIL + ',' + PRODUCTION_EMAIL, 'OPEN', ''
+    config.purchaseEmail + ',' + config.productionEmail, 'OPEN', ''
   ]);
   const msg = `Partial QC rejection for item ${itemId} (${itemName}).\n\n` +
               `Received: ${receivedQty}\nAccepted: ${acceptedQty}\nRejected: ${rejected}\n` +
               `Challan: ${challan}\nPO: ${poNumber || 'N/A'}\n\nAction required: return or dispose rejected units.`;
-  MailApp.sendEmail({ to: PURCHASE_EMAIL,   subject: `Partial Rejection — ${itemId}`, body: msg });
-  MailApp.sendEmail({ to: PRODUCTION_EMAIL, subject: `Partial Rejection — ${itemId}`, body: msg });
+  MailApp.sendEmail({ to: config.purchaseEmail,   subject: `Partial Rejection — ${itemId}`, body: msg });
+  MailApp.sendEmail({ to: config.productionEmail, subject: `Partial Rejection — ${itemId}`, body: msg });
 }
 
 // ============ OUTWARD PROCESSING ============
