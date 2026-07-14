@@ -319,7 +319,7 @@ function processInward(qrCode, quantity, challanNumber, poNumber, supplierCompan
             `Challan:  ${challanNumber}\n` +
             `PO:       ${poNumber || 'N/A'}\n` +
             `Time:     ${new Date().toLocaleString()}\n\n` +
-            `── QC Actions ──\n` +
+            `--- QC Actions ---\n` +
             `On PC:    ${qcLink}\n` +
             `On Phone: Scan the QR code on the item in the QC Scanner app`
     });
